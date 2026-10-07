@@ -190,4 +190,13 @@ def healthz():
     return {"ok": True}
 
 
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """Make browsers re-check (cheap 304s via ETag) so an upgrade never pairs old HTML with new JS."""
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+app.mount("/", RevalidatingStaticFiles(directory=STATIC_DIR, html=True), name="static")

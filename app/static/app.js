@@ -312,7 +312,7 @@ function resetSheet() {
   $("#btn-delete").hidden = true;
   $("#btn-reread").disabled = true;
   $("#ocr-status").textContent = "";
-  Object.assign(sheetState, { mode: "new", id: null, source: "manual", image: null, ocrRaw: null, crop: null });
+  Object.assign(sheetState, { mode: "new", id: null, source: "manual", image: null, ocrRaw: null, crop: null, batchRow: null });
 }
 
 $("#btn-manual").addEventListener("click", () => {
@@ -342,8 +342,10 @@ $("#in-camera").addEventListener("change", (e) => handlePhoto(e.target, "camera"
 $("#in-upload").addEventListener("change", (e) => handlePhoto(e.target, "upload"));
 
 async function handlePhoto(input, source) {
-  const file = input.files && input.files[0];
+  const files = [...(input.files || [])];
   input.value = "";
+  if (files.length > 1) return startBatch(files);
+  const file = files[0];
   if (!file) return;
   resetSheet();
   sheetState.source = source;
@@ -430,35 +432,42 @@ $("#btn-reread").addEventListener("click", () => {
   if (sheetState.crop) runOcr({ crop: sheetState.crop });
 });
 
-function parseValue() {
-  const v = $("#f-value").value.trim().replace(",", ".");
+function parseValueText(text) {
+  const v = text.trim().replace(",", ".");
   return /^\d+(\.\d{1,3})?$/.test(v) ? parseFloat(v) : null;
 }
+const parseValue = () => parseValueText($("#f-value").value);
 
-// Warn (but allow) when a value goes backwards or jumps implausibly.
+// Warn (but allow) when a value goes backwards or jumps implausibly. `others` = [{t, value}].
+function plausibilityWarning(v, ts, others) {
+  const sorted = [...others].sort((a, b) => a.t - b.t);
+  const before = sorted.filter((r) => r.t <= ts).pop();
+  const after = sorted.find((r) => r.t > ts);
+  if (before && v < before.value) {
+    return `Lower than the previous reading (${fmtM3(before.value)} m³ on ${fmtWhen(new Date(before.t))}).`;
+  }
+  if (after && v > after.value) {
+    return `Higher than the next reading (${fmtM3(after.value)} m³ on ${fmtWhen(new Date(after.t))}).`;
+  }
+  if (before) {
+    const days = Math.max((ts - before.t) / 864e5, 1 / 24);
+    const perDay = ((v - before.value) * 1000) / days;
+    if (perDay > 5000) return `That is ${fmtLitres(perDay)}/day since the previous reading – is the value right?`;
+  }
+  return "";
+}
+
 function checkValue() {
   const v = parseValue();
   const ts = new Date($("#f-ts").value).getTime();
   const warn = $("#value-warn");
   warn.hidden = true;
   if (v == null || isNaN(ts)) return;
-  const others = state.readings.filter((r) => r.id !== sheetState.id);
-  const before = others.filter((r) => r.t <= ts).pop();
-  const after = others.find((r) => r.t > ts);
-  if (before && v < before.value) {
-    warn.textContent = `Lower than the previous reading (${fmtM3(before.value)} m³ on ${fmtWhen(new Date(before.t))}).`;
-    warn.hidden = false;
-  } else if (after && v > after.value) {
-    warn.textContent = `Higher than the next reading (${fmtM3(after.value)} m³ on ${fmtWhen(new Date(after.t))}).`;
-    warn.hidden = false;
-  } else if (before) {
-    const days = Math.max((ts - before.t) / 864e5, 1 / 24);
-    const perDay = ((v - before.value) * 1000) / days;
-    if (perDay > 5000) {
-      warn.textContent = `That is ${fmtLitres(perDay)}/day since the last reading – is the value right?`;
-      warn.hidden = false;
-    }
-  }
+  const others = sheetState.mode === "batch"
+    ? batchComparables(sheetState.batchRow)
+    : state.readings.filter((r) => r.id !== sheetState.id);
+  warn.textContent = plausibilityWarning(v, ts, others);
+  warn.hidden = !warn.textContent;
 }
 $("#f-value").addEventListener("input", checkValue);
 $("#f-ts").addEventListener("change", checkValue);
@@ -484,6 +493,16 @@ $("#sheet-form").addEventListener("submit", async (e) => {
   if (value == null) return toast("Enter the reading as a number, e.g. 142.738");
   if (isNaN(ts)) return toast("Pick a date and time");
   const note = $("#f-note").value.trim();
+  if (sheetState.mode === "batch") {
+    // Hand the corrected values back to the batch list; nothing is saved yet.
+    Object.assign(sheetState.batchRow, {
+      valueText: value.toFixed(3), ts: $("#f-ts").value, note,
+      image: sheetState.image, ocrRaw: sheetState.ocrRaw, include: true,
+    });
+    sheet.close();
+    renderBatch();
+    return;
+  }
   try {
     if (sheetState.mode === "edit") {
       await api(`api/readings/${sheetState.id}`, {
@@ -506,6 +525,193 @@ $("#sheet-form").addEventListener("submit", async (e) => {
     load();
   } catch (err) {
     toast(`Save failed: ${err.message}`);
+  }
+});
+
+// ---------- several photos at once ----------
+const batchDlg = $("#batch");
+let batch = [];  // [{file, url, status: pending|reading|done|error, image, valueText, ts, ocrRaw, box, note, include, el}]
+
+function batchComparables(except) {
+  const rows = batch
+    .filter((r) => r !== except && r.include && parseValueText(r.valueText || "") != null && r.ts)
+    .map((r) => ({ t: new Date(r.ts).getTime(), value: parseValueText(r.valueText) }));
+  return [...state.readings, ...rows];
+}
+
+async function startBatch(files) {
+  batch.forEach((r) => URL.revokeObjectURL(r.url));
+  batch = files.map((file) => ({
+    file, url: URL.createObjectURL(file), status: "pending", image: null, valueText: "",
+    ts: toLocalInput(new Date(file.lastModified || Date.now())), ocrRaw: null, box: null, note: "", include: true,
+  }));
+  $("#batch-list").replaceChildren(...batch.map(batchRowEl));
+  renderBatch();
+  batchDlg.showModal();
+
+  // One at a time: OCR is CPU-bound on the server.
+  for (const row of batch) {
+    if (!batchDlg.open) break;
+    row.status = "reading";
+    renderBatch();
+    try {
+      const fd = new FormData();
+      fd.append("file", row.file);
+      const res = await api("api/ocr", { method: "POST", body: fd });
+      Object.assign(row, { status: "done", image: res.image, ocrRaw: res.digits || null, box: res.box });
+      if (res.taken_at) row.ts = res.taken_at.slice(0, 19);
+      if (res.value != null) row.valueText = res.value.toFixed(3);
+      else row.include = false;  // nothing read: opt-in after fixing
+    } catch (err) {
+      Object.assign(row, { status: "error", error: err.message, include: false });
+    }
+    renderBatch();
+  }
+  // Review in time order.
+  batch.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  $("#batch-list").replaceChildren(...batch.map((r) => r.el));
+  renderBatch();
+}
+
+function batchRowEl(row) {
+  const li = document.createElement("li");
+  li.className = "batch-row";
+
+  const thumb = document.createElement("button");
+  thumb.type = "button";
+  thumb.className = "thumb";
+  thumb.title = "Open photo to fix the reading";
+  const img = document.createElement("img");
+  img.alt = row.file.name;
+  img.src = row.url;
+  thumb.append(img);
+  thumb.addEventListener("click", () => openBatchRow(row));
+
+  const fields = document.createElement("div");
+  fields.className = "fields";
+  const value = document.createElement("input");
+  value.type = "text";
+  value.inputMode = "decimal";
+  value.placeholder = "m³";
+  value.setAttribute("aria-label", "Reading (m³)");
+  value.addEventListener("input", () => { row.valueText = value.value; if (value.value) row.include = true; renderBatch(); });
+  const ts = document.createElement("input");
+  ts.type = "datetime-local";
+  ts.step = 1;
+  ts.setAttribute("aria-label", "Date and time");
+  ts.addEventListener("change", () => { row.ts = ts.value; renderBatch(); });
+  const msg = document.createElement("p");
+  msg.className = "msg";
+  fields.append(value, ts, msg);
+
+  const incl = document.createElement("input");
+  incl.type = "checkbox";
+  incl.className = "incl";
+  incl.title = "Save this reading";
+  incl.addEventListener("change", () => { row.include = incl.checked; renderBatch(); });
+
+  li.append(thumb, fields, incl);
+  row.el = li;
+  row.ui = { value, ts, msg, incl };
+  return li;
+}
+
+function renderBatch() {
+  let pending = 0, ready = 0, invalid = 0;
+  for (const row of batch) {
+    const { value, ts, msg, incl } = row.ui;
+    if (document.activeElement !== value) value.value = row.valueText;
+    if (document.activeElement !== ts) ts.value = row.ts;
+    incl.checked = row.include;
+    row.el.classList.toggle("skip", !row.include);
+    const busy = row.status === "pending" || row.status === "reading";
+    value.disabled = ts.disabled = incl.disabled = busy;
+    if (busy) pending++;
+
+    const v = parseValueText(row.valueText || "");
+    const t = new Date(row.ts).getTime();
+    const bad = row.include && !busy && (v == null || isNaN(t));
+    value.classList.toggle("invalid", bad && v == null);
+    if (bad) invalid++;
+    else if (row.include && !busy) ready++;
+
+    msg.classList.remove("warn");
+    if (row.status === "pending") msg.textContent = "Waiting…";
+    else if (row.status === "reading") msg.textContent = "Reading the meter…";
+    else if (row.status === "error") msg.textContent = `Failed: ${row.error}`;
+    else if (row.include && v != null && !isNaN(t)) {
+      const w = plausibilityWarning(v, t, batchComparables(row));
+      msg.textContent = w || (row.ocrRaw ? `Read ${row.ocrRaw}` : "");
+      if (w) msg.classList.add("warn");
+    } else if (!row.valueText) msg.textContent = "Couldn't read the counter – tap the photo to fix it, or type the value.";
+    else msg.textContent = "";
+  }
+  const total = batch.length;
+  $("#batch-title").textContent = `Review ${total} photos`;
+  $("#batch-status").textContent = pending
+    ? `Reading ${total - pending + 1} of ${total}…`
+    : `${ready} ready to save${invalid ? `, ${invalid} need a value` : ""}.`;
+  const save = $("#batch-save");
+  save.disabled = pending > 0 || ready === 0 || invalid > 0;
+  save.textContent = ready ? `Save ${ready}` : "Save";
+}
+
+function openBatchRow(row) {
+  if (row.status !== "done" && row.status !== "error") return;
+  resetSheet();
+  Object.assign(sheetState, { mode: "batch", batchRow: row, source: "upload", image: row.image, ocrRaw: row.ocrRaw });
+  $("#sheet-title").textContent = row.file.name;
+  $("#photo-wrap").hidden = false;
+  $("#photo").src = row.image ? `api/images/${encodeURIComponent(row.image)}` : row.url;
+  if (row.box) showBox(row.box);
+  $("#ocr-status").textContent = row.ocrRaw ? `OCR read: ${row.ocrRaw}` : "";
+  $("#f-value").value = row.valueText;
+  $("#f-ts").value = row.ts;
+  $("#f-note").value = row.note;
+  $("#btn-save").textContent = "Done";
+  sheet.showModal();
+  checkValue();
+}
+sheet.addEventListener("close", () => { $("#btn-save").textContent = "Save"; });
+
+$("#batch-cancel").addEventListener("click", () => batchDlg.close());
+batchDlg.addEventListener("close", () => {
+  batch.forEach((r) => URL.revokeObjectURL(r.url));
+  batch = [];
+  $("#batch-list").replaceChildren();
+});
+
+$("#batch-save").addEventListener("click", async () => {
+  const rows = batch.filter((r) => r.include && (r.status === "done" || r.status === "error"));
+  rows.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  $("#batch-save").disabled = true;
+  let saved = 0;
+  const failed = [];
+  for (const row of rows) {
+    try {
+      await api("api/readings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value: parseValueText(row.valueText), ts: new Date(row.ts).toISOString(), note: row.note || null,
+          source: "upload", image: row.image, ocr_raw: row.ocrRaw,
+        }),
+      });
+      saved++;
+      row.include = false;
+      row.el.remove();
+    } catch (err) {
+      failed.push(`${row.file.name}: ${err.message}`);
+    }
+  }
+  batch = batch.filter((r) => r.el.isConnected);
+  load();
+  if (failed.length) {
+    toast(`Saved ${saved}, ${failed.length} failed: ${failed[0]}`, 6000);
+    renderBatch();
+  } else {
+    batchDlg.close();
+    toast(`Saved ${saved} reading${saved === 1 ? "" : "s"}`);
   }
 });
 

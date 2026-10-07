@@ -3,8 +3,10 @@
 Self-hosted, phone-friendly web app to track a water meter from photos.
 
 - 📷 **Take photo**: opens the phone camera, OCRs the counter, you confirm, saved.
-- 🖼️ **Upload photo**: same, with the date taken from EXIF (then from the file name, e.g.
+- 🖼️ **Upload photos**: same, with the date taken from EXIF (then from the file name, e.g.
   `IMG_20260920_125022.jpg`, then from the file's modified time). It's editable before saving.
+  Pick several photos at once to get a review list: each is OCR'd in turn and shown with its value,
+  date and any plausibility warning. Tap a photo to fix a misread, and untick the ones to skip.
 - ✏️ **Manual entry**, and edit/delete any reading.
 - Usage chart (litres per hour/day/week/month) and meter chart, with 24h/7d/30d/90d/1y/All ranges.
   Pinch or scroll to zoom, and use the slider to pan.

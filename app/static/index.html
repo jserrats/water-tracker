@@ -40,8 +40,8 @@
       <input type="file" accept="image/*" capture="environment" id="in-camera" hidden>
     </label>
     <label class="btn big">
-      🖼️ Upload photo
-      <input type="file" accept="image/*" id="in-upload" hidden>
+      🖼️ Upload photos
+      <input type="file" accept="image/*" id="in-upload" multiple hidden>
     </label>
     <button class="btn big" id="btn-manual">✏️ Enter manually</button>
   </section>
@@ -116,6 +116,21 @@
       <button type="submit" class="btn primary" id="btn-save">Save</button>
     </div>
   </form>
+</dialog>
+
+<!-- Review several uploaded photos at once -->
+<dialog id="batch">
+  <div class="batch">
+    <h2 id="batch-title">Review photos</h2>
+    <p class="hint" id="batch-status"></p>
+    <ul id="batch-list" class="batch-list"></ul>
+    <p class="hint">Tap a photo to fix a misread digit. Untick photos you don't want to save.</p>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="batch-cancel">Cancel</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="batch-save" disabled>Save</button>
+    </div>
+  </div>
 </dialog>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>

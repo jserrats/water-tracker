@@ -147,3 +147,27 @@ dialog input {
   font-size: .9rem; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20;
 }
 .toast.show { opacity: 1; }
+
+.batch { display: grid; gap: 10px; }
+.batch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 62dvh; overflow-y: auto; }
+.batch-row {
+  display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 8px; border: 1px solid var(--border); border-radius: 12px;
+}
+.batch-row.skip { opacity: .5; }
+.batch-row .thumb {
+  width: 72px; height: 72px; padding: 0; border: 0; border-radius: 8px; overflow: hidden;
+  background: var(--bg); cursor: pointer;
+}
+.batch-row .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.batch-row .fields { display: grid; gap: 6px; min-width: 0; }
+.batch-row input[type=text], .batch-row input[type=datetime-local] {
+  font: inherit; width: 100%; min-height: 36px; padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-primary);
+}
+.batch-row input[type=text] { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.batch-row input[type=datetime-local] { font-size: .85rem; }
+.batch-row input.invalid { border-color: var(--danger); }
+.batch-row .msg { font-size: .78rem; color: var(--text-muted); margin: 0; }
+.batch-row .msg.warn { padding: 4px 8px; }
+.batch-row .incl { width: 22px; height: 22px; margin: 6px 2px; accent-color: var(--accent); }
