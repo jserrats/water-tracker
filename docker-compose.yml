@@ -1,0 +1,17 @@
+services:
+  water-tracker:
+    image: ghcr.io/jserrats/water-tracker:latest
+    container_name: water-tracker
+    restart: unless-stopped
+    ports:
+      - "8080:8000"
+    environment:
+      # Time zone used for photo EXIF timestamps (which carry no zone) and for seeding.
+      TZ: ${TZ:-Europe/Madrid}
+    volumes:
+      - water-data:/data
+      # Photos imported into an empty database on first boot. Remove this line to start empty.
+      - ./pics:/seed:ro
+
+volumes:
+  water-data:

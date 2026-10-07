@@ -1,0 +1,15 @@
+# Versions tested together. rapidocr-onnxruntime itself is installed in the Dockerfile
+# with --no-deps; the block below is its dependency list minus the GUI build of OpenCV.
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+pillow==12.3.0
+pillow-heif>=0.18  # optional: HEIC uploads
+numpy==2.5.3
+opencv-python-headless==5.0.0.93
+onnxruntime==1.30.0
+pyclipper==1.4.0
+shapely==2.1.2
+pyyaml==6.0.3
+six==1.17.0
+tqdm==4.70.1

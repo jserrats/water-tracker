@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2a78d6">
+  <title>Water meter</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>💧 Water meter</h1>
+  <a class="btn ghost" href="api/readings.csv" download>Export CSV</a>
+</header>
+
+<main>
+  <section class="tiles">
+    <div class="tile">
+      <div class="tile-label">Latest reading</div>
+      <div class="tile-value" id="stat-latest">–</div>
+      <div class="tile-sub" id="stat-latest-when"></div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Used in range</div>
+      <div class="tile-value" id="stat-used">–</div>
+      <div class="tile-sub" id="stat-used-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Average per day</div>
+      <div class="tile-value" id="stat-avg">–</div>
+      <div class="tile-sub">over the selected range</div>
+    </div>
+  </section>
+
+  <section class="actions">
+    <label class="btn primary big">
+      📷 Take photo
+      <input type="file" accept="image/*" capture="environment" id="in-camera" hidden>
+    </label>
+    <label class="btn big">
+      🖼️ Upload photo
+      <input type="file" accept="image/*" id="in-upload" hidden>
+    </label>
+    <button class="btn big" id="btn-manual">✏️ Enter manually</button>
+  </section>
+
+  <section class="card">
+    <div class="filters">
+      <div class="seg" id="range" role="group" aria-label="Time range">
+        <button data-range="1">24h</button>
+        <button data-range="7">7d</button>
+        <button data-range="30" class="on">30d</button>
+        <button data-range="90">90d</button>
+        <button data-range="365">1y</button>
+        <button data-range="0">All</button>
+      </div>
+      <div class="seg" id="mode" role="group" aria-label="Chart">
+        <button data-mode="usage" class="on">Usage</button>
+        <button data-mode="meter">Meter</button>
+      </div>
+      <select id="bucket" aria-label="Group usage by">
+        <option value="auto">Auto</option>
+        <option value="hour">Per hour</option>
+        <option value="day">Per day</option>
+        <option value="week">Per week</option>
+        <option value="month">Per month</option>
+      </select>
+    </div>
+    <h2 id="chart-title" class="chart-title"></h2>
+    <div id="chart" class="chart"></div>
+    <p class="hint">Pinch or scroll to zoom, drag to pan. Use the slider below the chart to change the window.</p>
+  </section>
+
+  <section class="card">
+    <h2>Readings <span class="hint">· tap a row to edit</span></h2>
+    <div class="table-wrap">
+      <table class="readings">
+        <thead><tr><th>When</th><th class="num">Reading (m³)</th><th class="num">Δ (L)</th><th aria-label="Edit"></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="empty" hidden>No readings yet. Take a photo of the meter to get started.</p>
+  </section>
+</main>
+
+<!-- Review / edit sheet -->
+<dialog id="sheet">
+  <form method="dialog" id="sheet-form">
+    <h2 id="sheet-title">New reading</h2>
+    <div id="photo-wrap" class="photo-wrap" hidden>
+      <div class="photo-stage" id="photo-stage">
+        <img id="photo" alt="Meter photo">
+        <div id="box" class="box" hidden></div>
+      </div>
+      <p class="hint" id="ocr-status"></p>
+      <p class="hint">Wrong digits? Drag a rectangle around the counter and tap “Read again”.</p>
+      <button type="button" class="btn" id="btn-reread" disabled>🔍 Read again</button>
+    </div>
+    <label>Reading (m³)
+      <input id="f-value" type="text" inputmode="decimal" autocomplete="off" required
+             pattern="[0-9]+([.,][0-9]{1,3})?" placeholder="e.g. 142.738">
+    </label>
+    <p class="warn" id="value-warn" hidden></p>
+    <label>Date &amp; time
+      <input id="f-ts" type="datetime-local" step="1" required>
+    </label>
+    <label>Note (optional)
+      <input id="f-note" type="text" maxlength="500">
+    </label>
+    <div class="sheet-actions">
+      <button type="button" class="btn danger" id="btn-delete" hidden>Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="btn-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="btn-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/echarts.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
