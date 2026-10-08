@@ -23,6 +23,11 @@
       <div class="tile-sub" id="stat-latest-when"></div>
     </div>
     <div class="tile">
+      <div class="tile-label">Main valve</div>
+      <div class="tile-value" id="stat-valve">–</div>
+      <div class="tile-sub" id="stat-valve-when"></div>
+    </div>
+    <div class="tile">
       <div class="tile-label">Used in range</div>
       <div class="tile-value" id="stat-used">–</div>
       <div class="tile-sub" id="stat-used-sub"></div>
@@ -70,6 +75,7 @@
     </div>
     <h2 id="chart-title" class="chart-title"></h2>
     <div id="chart" class="chart"></div>
+    <p class="hint" id="valve-legend" hidden><span class="band-key"></span> Shaded: main valve closed (from the photo where it was recorded closed until the next one recording it open).</p>
     <p class="hint">Pinch or scroll to zoom, drag to pan. Use the slider below the chart to change the window.</p>
   </section>
 
@@ -103,6 +109,14 @@
              pattern="[0-9]+([.,][0-9]{1,3})?" placeholder="e.g. 142.738">
     </label>
     <p class="warn" id="value-warn" hidden></p>
+    <fieldset class="valve-field" id="valve-field">
+      <legend>Main valve <span id="valve-hint" class="hint"></span></legend>
+      <div class="seg valve-seg" role="radiogroup" aria-label="Main valve">
+        <button type="button" role="radio" data-valve="open">Open</button>
+        <button type="button" role="radio" data-valve="closed">Closed</button>
+        <button type="button" role="radio" data-valve="unknown" id="valve-unknown">Not recorded</button>
+      </div>
+    </fieldset>
     <label>Date &amp; time
       <input id="f-ts" type="datetime-local" step="1" required>
     </label>

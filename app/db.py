@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS readings (
     image      TEXT,                   -- file name inside IMAGE_DIR
     ocr_raw    TEXT,
     note       TEXT,
+    valve      TEXT CHECK (valve IN ('open', 'closed')),  -- main valve when the reading was taken
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS readings_ts ON readings(ts);
@@ -30,6 +31,10 @@ def init():
     os.makedirs(IMAGE_DIR, exist_ok=True)
     with connect() as conn:
         conn.executescript(SCHEMA)
+        # Databases created before valve tracking.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(readings)")}
+        if "valve" not in cols:
+            conn.execute("ALTER TABLE readings ADD COLUMN valve TEXT CHECK (valve IN ('open', 'closed'))")
 
 
 @contextmanager

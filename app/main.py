@@ -5,6 +5,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -40,6 +41,7 @@ class ReadingIn(BaseModel):
     image: str | None = None
     ocr_raw: str | None = None
     note: str | None = Field(default=None, max_length=500)
+    valve: Literal["open", "closed"] | None = None
 
 
 def row_to_dict(row):
@@ -67,8 +69,8 @@ def create_reading(r: ReadingIn):
     image = check_image_name(r.image)
     with db.connect() as conn:
         cur = conn.execute(
-            "INSERT INTO readings(ts, value, source, image, ocr_raw, note) VALUES (?,?,?,?,?,?)",
-            (db.utc_iso(r.ts), r.value, r.source, image, r.ocr_raw, r.note),
+            "INSERT INTO readings(ts, value, source, image, ocr_raw, note, valve) VALUES (?,?,?,?,?,?,?)",
+            (db.utc_iso(r.ts), r.value, r.source, image, r.ocr_raw, r.note, r.valve),
         )
         row = conn.execute("SELECT * FROM readings WHERE id = ?", (cur.lastrowid,)).fetchone()
     return row_to_dict(row)
@@ -78,6 +80,7 @@ class ReadingPatch(BaseModel):
     ts: datetime | None = None
     value: float | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=500)
+    valve: Literal["open", "closed", "unknown"] | None = None  # "unknown" clears it
 
 
 @app.patch("/api/readings/{rid}")
@@ -89,6 +92,8 @@ def update_reading(rid: int, p: ReadingPatch):
         fields.append("value = ?"); args.append(p.value)
     if p.note is not None:
         fields.append("note = ?"); args.append(p.note)
+    if p.valve is not None:
+        fields.append("valve = ?"); args.append(None if p.valve == "unknown" else p.valve)
     with db.connect() as conn:
         if fields:
             conn.execute(f"UPDATE readings SET {', '.join(fields)} WHERE id = ?", (*args, rid))
@@ -119,13 +124,13 @@ def delete_reading(rid: int):
 def export_csv():
     with db.connect() as conn:
         rows = conn.execute(
-            "SELECT id, ts, value, source, note FROM readings ORDER BY ts, id"
+            "SELECT id, ts, value, valve, source, note FROM readings ORDER BY ts, id"
         ).fetchall()
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["id", "timestamp_utc", "reading_m3", "source", "note"])
+    w.writerow(["id", "timestamp_utc", "reading_m3", "main_valve", "source", "note"])
     for r in rows:
-        w.writerow([r["id"], r["ts"], f"{r['value']:.3f}", r["source"], r["note"] or ""])
+        w.writerow([r["id"], r["ts"], f"{r['value']:.3f}", r["valve"] or "", r["source"], r["note"] or ""])
     name = f"water-readings-{datetime.now().strftime('%Y%m%d')}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),

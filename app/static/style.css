@@ -7,6 +7,7 @@
   --text-secondary: #52514e;
   --text-muted: #7a7974;
   --grid: #e9e8e4;
+  --band: rgb(82 81 78 / .12);      /* "valve closed" background band */
   --series-1: #2a78d6;
   --accent: #2a78d6;
   --accent-ink: #ffffff;
@@ -25,6 +26,7 @@
     --text-secondary: #c3c2b7;
     --text-muted: #8f8e86;
     --grid: #2a2a28;
+    --band: rgb(195 194 183 / .12);
     --series-1: #3987e5;
     --accent: #3987e5;
     --danger: #e66767;
@@ -34,6 +36,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -55,14 +58,13 @@ main { max-width: 960px; margin: 0 auto; padding: 12px; display: grid; grid-temp
 h2 { font-size: 1rem; margin: 0 0 8px; }
 .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
 
-.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
 .tile-label { font-size: .78rem; color: var(--text-secondary); }
 .tile-value { font-size: 1.35rem; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-sub { font-size: .72rem; color: var(--text-muted); }
 @media (max-width: 520px) {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tiles .tile:first-child { grid-column: 1 / -1; }
 }
 
 .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -171,3 +173,14 @@ dialog input {
 .batch-row .msg { font-size: .78rem; color: var(--text-muted); margin: 0; }
 .batch-row .msg.warn { padding: 4px 8px; }
 .batch-row .incl { width: 22px; height: 22px; margin: 6px 2px; accent-color: var(--accent); }
+
+.valve-field { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; }
+.valve-field legend { font-size: .85rem; color: var(--text-secondary); padding: 0; margin-bottom: 4px; }
+.valve-field legend .hint { margin: 0; }
+.valve-seg { display: flex; }
+.valve-seg button { flex: 1; min-height: 44px; font-size: .95rem; }
+.valve-field.missing .valve-seg { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+.valve-tag { display: block; font-size: .72rem; color: var(--text-muted); }
+.valve-tag.closed { color: var(--text-secondary); font-weight: 600; }
+.batch-row .valve-tag { margin-top: -2px; }
+.band-key { display: inline-block; width: 14px; height: 10px; border-radius: 2px; background: var(--band); border: 1px solid var(--border); vertical-align: -1px; }

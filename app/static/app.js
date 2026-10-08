@@ -118,6 +118,36 @@ function usageBuckets(start, end, unit) {
   return out;
 }
 
+// The valve state is recorded with readings and holds until a later reading records another one.
+function valveIntervals() {
+  const out = [];
+  for (const r of state.readings) {
+    if (!r.valve) continue;
+    const last = out[out.length - 1];
+    if (last && last.state === r.valve) continue;
+    if (last) last.end = r.t;
+    out.push({ state: r.valve, start: r.t, end: Infinity });
+  }
+  return out;
+}
+
+function valveAt(t, intervals = valveIntervals()) {
+  const iv = intervals.find((i) => i.start <= t && t < i.end);
+  return iv ? iv.state : null;
+}
+
+// Share of [s, e) during which the valve was recorded closed.
+function closedFraction(s, e, intervals) {
+  let closed = 0;
+  for (const i of intervals) {
+    if (i.state !== "closed") continue;
+    closed += Math.max(0, Math.min(e, i.end) - Math.max(s, i.start));
+  }
+  return e > s ? closed / (e - s) : 0;
+}
+
+const VALVE_LABEL = { open: "Open", closed: "Closed" };
+
 // ---------- rendering ----------
 let chart;
 function render() {
@@ -131,6 +161,9 @@ function renderStats() {
   const last = r[r.length - 1];
   $("#stat-latest").textContent = last ? `${fmtM3(last.value)} m³` : "–";
   $("#stat-latest-when").textContent = last ? fmtWhen(new Date(last.t)) : "";
+  const iv = valveIntervals().pop();
+  $("#stat-valve").textContent = iv ? VALVE_LABEL[iv.state] : "–";
+  $("#stat-valve-when").textContent = iv ? `since ${fmtWhen(new Date(iv.start))}` : "not recorded yet";
   const [start, end] = rangeBounds();
   const s0 = Math.max(start, r.length ? r[0].t : start);
   const e0 = Math.min(end, last ? last.t : end);
@@ -188,42 +221,52 @@ function renderChart() {
   if (state.mode === "usage") {
     const unit = state.bucket === "auto" ? autoBucket(start, end) : state.bucket;
     const buckets = usageBuckets(start, end, unit);
+    const intervals = valveIntervals();
+    const now = Date.now();
+    buckets.forEach((b) => {
+      b.end = bucketNext(b.t, unit);
+      b.closed = closedFraction(b.t, Math.min(b.end, now), intervals);
+    });
+    // A real time axis (not categories) so valve bands can start and end at the exact recorded times.
+    const x0 = buckets.length ? buckets[0].t : start;
+    const x1 = buckets.length ? buckets[buckets.length - 1].end : end;
     $("#chart-title").textContent = `Litres used ${unit === "day" ? "per day" : `per ${unit}`}`;
     Object.assign(opt, {
-      xAxis: { type: "category", data: buckets.map((b) => b.label), axisLabel: { color: text2, hideOverlap: true },
-               axisTick: { show: false }, axisLine: { lineStyle: { color: cssVar("--grid") } } },
+      xAxis: timeAxis(x0, x1, text2),
       series: [{
         type: "bar",
         name: "Used",
-        data: buckets.map((b) => b.litres),
+        data: buckets.map((b) => [(b.t + b.end) / 2, b.litres]),
         itemStyle: { color: series1, borderRadius: [4, 4, 0, 0] },
         barMaxWidth: 28,
         barCategoryGap: "20%",
         emphasis: { itemStyle: { color: series1, opacity: 0.8 } },
+        markArea: valveBandStyle(closedBands(intervals, x0, x1), text2),
       }],
     });
     opt.yAxis.axisLabel.formatter = (v) => `${v} L`;
-    opt.tooltip.formatter = (ps) => {
-      const p = ps[0], b = buckets[p.dataIndex];
+    opt.tooltip.trigger = "item";
+    opt.tooltip.formatter = (p) => {
+      const b = buckets[p.dataIndex];
       if (b.litres == null) return `${esc(b.label)}<br>no data`;
       return `<b style="font-size:1.1em">${fmtLitres(b.litres)}</b><br>${esc(b.label)}` +
         (b.partial ? `<br><span style="opacity:.7">partial – only part of this ${unit} has readings</span>` : "") +
-        `<br><span style="opacity:.7">estimated between readings</span>`;
+        `<br><span style="opacity:.7">estimated between readings</span>` +
+        (b.closed > 0 ? `<br>Valve closed ${Math.round(b.closed * 100)}% of this ${unit}` : "") +
+        (b.closed > 0.99 && b.litres > 0.5 ? `<br><b>Water used while the valve was closed</b>` : "");
     };
-    opt.tooltip.axisPointer = { type: "shadow" };
   } else {
     // Keep one reading either side of the window so the line runs to the edges.
     const r = state.readings;
     const i0 = Math.max(0, r.findIndex((x) => x.t >= start) - 1);
     let i1 = r.findIndex((x) => x.t > end);
     i1 = i1 === -1 ? r.length : i1 + 1;
-    const pts = (r.findIndex((x) => x.t >= start) === -1 ? r.slice(-1) : r.slice(i0, i1)).map((x) => [x.t, x.value]);
+    const pts = (r.findIndex((x) => x.t >= start) === -1 ? r.slice(-1) : r.slice(i0, i1))
+      .map((x) => ({ value: [x.t, x.value], valve: x.valve }));
+    const intervals = valveIntervals();
     $("#chart-title").textContent = "Meter reading (m³)";
     Object.assign(opt, {
-      xAxis: { type: "time", min: start, max: end, splitNumber: Math.max(2, Math.floor($("#chart").clientWidth / 90)),
-               axisLabel: { color: text2, hideOverlap: true,
-                            formatter: { year: "{yyyy}", month: "{MMM}", day: "{d} {MMM}", hour: "{HH}:{mm}", minute: "{HH}:{mm}" } },
-               axisLine: { lineStyle: { color: cssVar("--grid") } }, splitLine: { show: false } },
+      xAxis: timeAxis(start, end, text2),
       series: [{
         type: "line",
         name: "Reading",
@@ -233,6 +276,7 @@ function renderChart() {
         symbolSize: 8,
         lineStyle: { width: 2, color: series1 },
         itemStyle: { color: series1, borderColor: cssVar("--surface-1"), borderWidth: 2 },
+        markArea: valveBandStyle(closedBands(intervals, start, end), text2),
       }],
     });
     opt.yAxis.scale = true;
@@ -242,14 +286,49 @@ function renderChart() {
     opt.tooltip.axisPointer = { type: "line", snap: true };
     opt.tooltip.formatter = (ps) => {
       const p = ps[0];
-      return `<b style="font-size:1.1em;color:${text1}">${fmtM3(p.value[1])} m³</b><br>${esc(fmtWhen(new Date(p.value[0])))}`;
+      const valve = p.data.valve || valveAt(p.value[0], intervals);
+      return `<b style="font-size:1.1em;color:${text1}">${fmtM3(p.value[1])} m³</b><br>${esc(fmtWhen(new Date(p.value[0])))}` +
+        (valve ? `<br>Valve ${valve}${p.data.valve ? "" : " (last recorded)"}` : "");
     };
   }
+
+  const [lo, hi] = state.mode === "usage" ? [opt.xAxis.min, opt.xAxis.max] : [start, end];
+  $("#valve-legend").hidden = !valveIntervals().some((i) => i.state === "closed" && i.end > lo && i.start < hi);
 
   const empty = state.mode === "usage" ? state.readings.length < 2 : state.readings.length === 0;
   opt.graphic = empty ? [{ type: "text", left: "center", top: "middle",
     style: { text: state.mode === "usage" ? "Need at least two readings" : "No readings yet", fill: text2, fontSize: 14 } }] : [];
   chart.setOption(opt, true);
+}
+
+function timeAxis(min, max, text2) {
+  return {
+    type: "time", min, max, splitNumber: Math.max(2, Math.floor($("#chart").clientWidth / 90)),
+    axisLabel: { color: text2, hideOverlap: true,
+                 formatter: { year: "{yyyy}", month: "{MMM}", day: "{d} {MMM}", hour: "{HH}:{mm}", minute: "{HH}:{mm}" } },
+    axisLine: { lineStyle: { color: cssVar("--grid") } }, splitLine: { show: false },
+  };
+}
+
+// Shaded spans for "valve closed", clipped to [min, max]. Only wide spans get a text label.
+function closedBands(intervals, min, max) {
+  const px = $("#chart").clientWidth / Math.max(1, max - min);
+  const now = Date.now();
+  return intervals
+    .filter((i) => i.state === "closed" && i.end > min && i.start < max)
+    .map((i) => {
+      const s = Math.max(i.start, min), e = Math.min(i.end === Infinity ? Math.max(now, i.start) : i.end, max);
+      return [{ xAxis: s, name: (e - s) * px > 80 ? "Valve closed" : "" }, { xAxis: e }];
+    });
+}
+
+function valveBandStyle(bands, text2) {
+  return {
+    silent: true,
+    itemStyle: { color: cssVar("--band") },
+    label: { show: true, position: "insideTop", color: text2, fontSize: 11, distance: 4 },
+    data: bands,
+  };
 }
 
 function esc(s) {
@@ -275,6 +354,12 @@ function renderTable() {
     src.textContent = { camera: "📷", upload: "🖼️", manual: "✏️", seed: "🌱" }[row.source] || "";
     src.title = row.source;
     tdWhen.append(src);
+    if (row.valve) {
+      const tag = document.createElement("span");
+      tag.className = `valve-tag ${row.valve}`;
+      tag.textContent = `valve ${row.valve}`;
+      tdWhen.append(tag);
+    }
 
     const tdVal = document.createElement("td");
     tdVal.className = "num";
@@ -300,7 +385,28 @@ function renderTable() {
 
 // ---------- review / edit sheet ----------
 const sheet = $("#sheet");
-const sheetState = { mode: "new", id: null, source: "manual", image: null, ocrRaw: null, crop: null };
+const sheetState = { mode: "new", id: null, source: "manual", image: null, ocrRaw: null, crop: null, valve: null, valveRequired: false };
+
+// Main valve selector. null = not recorded. When required (camera photos) "Not recorded" is hidden.
+function setValve(v) {
+  sheetState.valve = v;
+  $("#valve-field").classList.remove("missing");
+  $("#valve-unknown").hidden = sheetState.valveRequired;
+  document.querySelectorAll(".valve-seg button").forEach((b) => {
+    const on = b.dataset.valve === (v || (sheetState.valveRequired ? "" : "unknown"));
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", on);
+  });
+}
+$(".valve-seg").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (b) setValve(b.dataset.valve === "unknown" ? null : b.dataset.valve);
+});
+
+function valveHint() {
+  const iv = valveIntervals().pop();
+  $("#valve-hint").textContent = iv ? `· last recorded ${iv.state}, ${fmtShort(new Date(iv.start))}` : "";
+}
 
 function resetSheet() {
   $("#f-value").value = "";
@@ -312,7 +418,10 @@ function resetSheet() {
   $("#btn-delete").hidden = true;
   $("#btn-reread").disabled = true;
   $("#ocr-status").textContent = "";
-  Object.assign(sheetState, { mode: "new", id: null, source: "manual", image: null, ocrRaw: null, crop: null, batchRow: null });
+  Object.assign(sheetState, { mode: "new", id: null, source: "manual", image: null, ocrRaw: null, crop: null,
+                              batchRow: null, valveRequired: false });
+  setValve(null);
+  valveHint();
 }
 
 $("#btn-manual").addEventListener("click", () => {
@@ -329,6 +438,7 @@ function openEdit(row) {
   $("#f-value").value = row.value.toFixed(3);
   $("#f-ts").value = toLocalInput(new Date(row.t));
   $("#f-note").value = row.note || "";
+  setValve(row.valve || null);
   $("#btn-delete").hidden = false;
   if (row.image) {
     $("#photo-wrap").hidden = false;
@@ -349,6 +459,11 @@ async function handlePhoto(input, source) {
   if (!file) return;
   resetSheet();
   sheetState.source = source;
+  if (source === "camera") {
+    // The user is standing at the meter: ask what the main valve looks like right now.
+    sheetState.valveRequired = true;
+    setValve(null);
+  }
   $("#sheet-title").textContent = source === "camera" ? "New reading from camera" : "New reading from photo";
   $("#photo-wrap").hidden = false;
   const localUrl = URL.createObjectURL(file);
@@ -493,10 +608,16 @@ $("#sheet-form").addEventListener("submit", async (e) => {
   if (value == null) return toast("Enter the reading as a number, e.g. 142.738");
   if (isNaN(ts)) return toast("Pick a date and time");
   const note = $("#f-note").value.trim();
+  if (sheetState.valveRequired && !sheetState.valve) {
+    $("#valve-field").classList.add("missing");
+    $("#valve-field").scrollIntoView({ block: "center", behavior: "smooth" });
+    return toast("Is the main valve open or closed?");
+  }
+  const valve = sheetState.valve;
   if (sheetState.mode === "batch") {
     // Hand the corrected values back to the batch list; nothing is saved yet.
     Object.assign(sheetState.batchRow, {
-      valueText: value.toFixed(3), ts: $("#f-ts").value, note,
+      valueText: value.toFixed(3), ts: $("#f-ts").value, note, valve,
       image: sheetState.image, ocrRaw: sheetState.ocrRaw, include: true,
     });
     sheet.close();
@@ -508,14 +629,14 @@ $("#sheet-form").addEventListener("submit", async (e) => {
       await api(`api/readings/${sheetState.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value, ts: ts.toISOString(), note }),
+        body: JSON.stringify({ value, ts: ts.toISOString(), note, valve: valve || "unknown" }),
       });
     } else {
       await api("api/readings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          value, ts: ts.toISOString(), note: note || null,
+          value, ts: ts.toISOString(), note: note || null, valve,
           source: sheetState.source, image: sheetState.image, ocr_raw: sheetState.ocrRaw,
         }),
       });
@@ -543,7 +664,7 @@ async function startBatch(files) {
   batch.forEach((r) => URL.revokeObjectURL(r.url));
   batch = files.map((file) => ({
     file, url: URL.createObjectURL(file), status: "pending", image: null, valueText: "",
-    ts: toLocalInput(new Date(file.lastModified || Date.now())), ocrRaw: null, box: null, note: "", include: true,
+    ts: toLocalInput(new Date(file.lastModified || Date.now())), ocrRaw: null, box: null, note: "", valve: null, include: true,
   }));
   $("#batch-list").replaceChildren(...batch.map(batchRowEl));
   renderBatch();
@@ -641,7 +762,8 @@ function renderBatch() {
     else if (row.status === "error") msg.textContent = `Failed: ${row.error}`;
     else if (row.include && v != null && !isNaN(t)) {
       const w = plausibilityWarning(v, t, batchComparables(row));
-      msg.textContent = w || (row.ocrRaw ? `Read ${row.ocrRaw}` : "");
+      msg.textContent = [w || (row.ocrRaw ? `Read ${row.ocrRaw}` : ""), row.valve && `valve ${row.valve}`]
+        .filter(Boolean).join(" · ");
       if (w) msg.classList.add("warn");
     } else if (!row.valueText) msg.textContent = "Couldn't read the counter – tap the photo to fix it, or type the value.";
     else msg.textContent = "";
@@ -668,6 +790,7 @@ function openBatchRow(row) {
   $("#f-value").value = row.valueText;
   $("#f-ts").value = row.ts;
   $("#f-note").value = row.note;
+  setValve(row.valve);
   $("#btn-save").textContent = "Done";
   sheet.showModal();
   checkValue();
@@ -693,7 +816,7 @@ $("#batch-save").addEventListener("click", async () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          value: parseValueText(row.valueText), ts: new Date(row.ts).toISOString(), note: row.note || null,
+          value: parseValueText(row.valueText), ts: new Date(row.ts).toISOString(), note: row.note || null, valve: row.valve,
           source: "upload", image: row.image, ocr_raw: row.ocrRaw,
         }),
       });

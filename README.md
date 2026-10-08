@@ -8,6 +8,11 @@ Self-hosted, phone-friendly web app to track a water meter from photos.
   Pick several photos at once to get a review list: each is OCR'd in turn and shown with its value,
   date and any plausibility warning. Tap a photo to fix a misread, and untick the ones to skip.
 - ✏️ **Manual entry**, and edit/delete any reading.
+- 🚰 **Main valve tracking**: each reading can record whether the main valve was open or closed.
+  Taking a photo always asks; uploads, manual entries and edits make it optional. The valve counts
+  as being in the last recorded state until a later reading says otherwise. Closed periods are
+  shaded on both charts, and the usage tooltip shows how much of each period the valve was
+  closed. It also flags water used while the valve was closed.
 - Usage chart (litres per hour/day/week/month) and meter chart, with 24h/7d/30d/90d/1y/All ranges.
   Pinch or scroll to zoom, and use the slider to pan.
 - **Export CSV** button in the header (`/api/readings.csv`).
